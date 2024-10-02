@@ -1,20 +1,18 @@
-// ignore_for_file: unused_field
-
 import 'dart:io';
-
+import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
-import 'package:flutter_highlight/themes/monokai-sublime.dart';
-import 'package:flutter_highlight/themes/vs.dart';
 import 'package:highlight/languages/markdown.dart';
 import 'package:highlight/languages/x86asm.dart';
 import 'package:intel_hex/intel_hex.dart';
 import 'package:path/path.dart' as path;
 import 'package:z80_edu_board/constants.dart';
+import 'package:z80_edu_board/widgets/bottom_tab.dart';
+import 'package:z80_edu_board/widgets/listing_file_viewer.dart';
+import 'package:z80_edu_board/widgets/port_settings.dart';
+import 'package:z80_edu_board/widgets/text_editor.dart';
 
 void main() async {
   runApp(const MyApp());
@@ -22,7 +20,6 @@ void main() async {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
@@ -46,6 +43,18 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  Map<String, TextEditingController> settingsControllers = {
+    'Port': TextEditingController(),
+    'Baud Rate': TextEditingController(),
+    'Parity': TextEditingController(),
+    'Stop Bits': TextEditingController(),
+  };
+  Map<String, dynamic> settings = {
+    'Port': 'COM4',
+    'Baud Rate': 9600,
+    'Parity': 'NONE',
+    'Stop Bits': 1,
+  };
   String _asmFilePath = '';
   String _asmFileParentPath = '';
   String _asmFileContents = '';
@@ -53,16 +62,43 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isAssembled = false;
   bool _isConnected = false;
   final _asmFileEditorController = CodeController(
-    text: 'just a test', // Initial code
+    text: 'Load a Program File', // Initial code
     language: x86Asm,
   );
   final _lstFileEditorController = CodeController(
-      text: 'just a test', // Initial code
+      text: '', // Initial code
       language: markdown);
   bool _isFileSaved = true;
   bool _isFileLoaded = false;
 
-  void createNewFile() {}
+  void createNewFile() async {
+    String? directoryPath = await FilePicker.platform.getDirectoryPath();
+    String formattedTime = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+
+    if (directoryPath != null) {
+      String filePath = '$directoryPath/new_file_$formattedTime.asm';
+      File newFile = File(filePath);
+      await newFile.writeAsString('; ASM file created\n');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('File created: $filePath')),
+      );
+      _asmFilePath = filePath;
+
+      final asmFileContents = await newFile.readAsString();
+      setState(() {
+        _asmFileEditorController.text = asmFileContents;
+        _asmFileParentPath = newFile.parent.path;
+        _asmFileContents = asmFileContents;
+        _isFileLoaded = true;
+        _isFileSaved = true;
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No directory selected')),
+      );
+    }
+  }
+
   void openFile() async {
     final result = await FilePicker.platform.pickFiles(allowMultiple: false);
     if (result == null) return;
@@ -94,7 +130,7 @@ class _MyHomePageState extends State<MyHomePage> {
       saveChanges();
     }
     try {
-      // Execute the ZASM assembler command with the input file
+      // Execute the VASM assembler command with the appropriate arguments
       final result = await Process.run('vasmz80_oldstyle', [
         '-Fihex',
         '-dotdir',
@@ -120,6 +156,7 @@ class _MyHomePageState extends State<MyHomePage> {
         '$_asmFileParentPath/${path.basenameWithoutExtension(_asmFilePath)}.lst');
     final lstFileContents = await lstFile.readAsStringSync();
     setState(() {
+      _lstFileEditorController.text = '';
       _lstFileEditorController.text = lstFileContents;
       _isAssembled = true;
     });
@@ -142,6 +179,8 @@ class _MyHomePageState extends State<MyHomePage> {
       memoryContents.add(addressContent.toRadixString(16));
     });
     _memoryContents = memoryContents;
+
+    // FUTURE WORK: IMPLEMENT SERIAL COMMUNICATION STARTING FROM HERE
   }
 
   void changeSettings() {
@@ -152,14 +191,10 @@ class _MyHomePageState extends State<MyHomePage> {
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(kPaddingUnit / 2)),
             title: Text("Port Settings"),
-            content: Column(
-              children: [
-                CheckboxListTile(
-                  value: false,
-                  onChanged: (value) {},
-                  title: Text('CRC'),
-                )
-              ],
+            content: Padding(
+              padding: EdgeInsets.all(kPaddingUnit * 10),
+              child: PortSettings(
+                  settingsControllers: settingsControllers, settings: settings),
             ),
             actionsPadding: EdgeInsets.all(kPaddingUnit * 2),
             actions: [
@@ -181,7 +216,15 @@ class _MyHomePageState extends State<MyHomePage> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(ctx).primaryColor,
                 ),
-                onPressed: () {},
+                onPressed: () {
+                  settings['Port'] = settingsControllers['Port']!.value;
+                  settings['Baud Rate'] =
+                      settingsControllers['Baud Rate']!.value;
+                  settings['Parity'] = settingsControllers['Parity']!.value;
+                  settings['Stop Bits'] =
+                      settingsControllers['Stop Bits']!.value;
+                  Navigator.pop(context);
+                },
                 child: Text(
                   'Save',
                   style: TextStyle(
@@ -193,6 +236,8 @@ class _MyHomePageState extends State<MyHomePage> {
           );
         });
   }
+
+  void openSerialMonitor() {}
 
   void _showToast(BuildContext context, String message) {
     final scaffold = ScaffoldMessenger.of(context);
@@ -224,6 +269,9 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void dispose() {
     _asmFileEditorController.dispose();
+    settingsControllers.forEach((key, value) {
+      value.dispose();
+    });
     super.dispose();
   }
 
@@ -292,6 +340,15 @@ class _MyHomePageState extends State<MyHomePage> {
                 size: kTooldBarIconSize,
               ),
             ),
+            IconButton(
+              style: IconButton.styleFrom(shape: LinearBorder()),
+              tooltip: 'Serial Monitor',
+              onPressed: openSerialMonitor,
+              icon: const Icon(
+                Icons.terminal_sharp,
+                size: kTooldBarIconSize,
+              ),
+            ),
           ],
         ),
       ),
@@ -306,28 +363,8 @@ class _MyHomePageState extends State<MyHomePage> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      flex: 2,
-                      child: CodeTheme(
-                        data: CodeThemeData(
-                          styles: vsTheme,
-                        ),
-                        child: CodeField(
-                          expands: true,
-                          decoration: BoxDecoration(
-                            color: Colors.grey[100],
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          textStyle: const TextStyle(
-                            fontFamily: 'Courier New', // Use a monospaced font
-
-                            fontSize: 16,
-                          ),
-                          gutterStyle: GutterStyle.none,
-                          controller: _asmFileEditorController,
-                        ),
-                      ),
-                    ),
+                    TextEditor(
+                        asmFileEditorController: _asmFileEditorController),
                     !_isAssembled
                         ? const SizedBox()
                         : const SizedBox(
@@ -335,47 +372,18 @@ class _MyHomePageState extends State<MyHomePage> {
                           ),
                     !_isAssembled
                         ? const SizedBox()
-                        : Expanded(
-                            child: CodeTheme(
-                              data: CodeThemeData(
-                                styles: monokaiSublimeTheme,
-                              ),
-                              child: CodeField(
-                                expands: true,
-                                decoration: BoxDecoration(
-                                  color: Colors.black,
-                                  borderRadius:
-                                      BorderRadius.circular(kPaddingUnit),
-                                ),
-                                textStyle: const TextStyle(
-                                  fontFamily:
-                                      'Courier New', // Use a monospaced font
-
-                                  fontSize: 12,
-                                ),
-                                gutterStyle: GutterStyle.none,
-                                controller: _lstFileEditorController,
-                              ),
-                            ),
+                        : ListingFileViewer(
+                            lstFileEditorController: _lstFileEditorController,
                           ),
                   ],
                 ),
               ),
             ),
-            Container(
-              padding: EdgeInsets.all(kPaddingUnit),
-              color: Colors.grey,
-              height: 30,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                      '$_asmFilePath${_isFileLoaded ? _isFileSaved ? '' : '*' : ''}'),
-                  Text(_isConnected
-                      ? 'Z80 EduBoard: Connected.'
-                      : 'Z80 EduBoard: Not Connected'),
-                ],
-              ),
+            BottomTab(
+              asmFilePath: _asmFilePath,
+              isFileLoaded: _isFileLoaded,
+              isFileSaved: _isFileSaved,
+              isConnected: _isConnected,
             ),
           ],
         ),
